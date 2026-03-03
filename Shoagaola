@@ -5,7 +5,7 @@ from PIL import Image, ImageDraw, ImageFont
 import io
 
 # ===== CONFIG =====
-BOT_TOKEN = "8282813967:AAEbu2NlpUky6mwV1EzJafYHgu3oewrqgmc"
+BOT_TOKEN = "8551651255:AAGvx1ZR-qy-_OZIjg6IqvzDpb1TtXlcD3A"
 bot = telebot.TeleBot(BOT_TOKEN)
 
 # ====== TRADE STATS SYSTEM ======
