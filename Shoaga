@@ -1,7 +1,7 @@
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-from tradingview_ta import TA_Handler, Interval, Exchange
-from PIL import Image, ImageDraw, ImageFont, ImageFilter
+from tradingview_ta import TA_Handler, Interval
+from PIL import Image, ImageDraw, ImageFont
 import io
 
 # ===== CONFIG =====
@@ -35,10 +35,10 @@ def loss_trade(message):
 def show_stats(message):
     bot.reply_to(message, get_stats_text(), parse_mode="Markdown")
 
-# ====== PROFESSIONAL SIGNAL IMAGE USING TEMPLATE ======
+# ====== PROFESSIONAL SIGNAL IMAGE GENERATOR ======
 def create_professional_signal_image(symbol, final_signal, confidence, buy_votes, sell_votes,
                                      rsi, ema20, ema50, macd, stoch, alligator_trend, zigzag):
-    # Load pre-made template PNG
+    # Choose template based on signal
     template_path = "buy_template.png" if final_signal == "BUY" else "sell_template.png"
     bg = Image.open(template_path).convert("RGBA")
     draw = ImageDraw.Draw(bg)
@@ -46,16 +46,15 @@ def create_professional_signal_image(symbol, final_signal, confidence, buy_votes
     # Fonts
     try:
         title_font = ImageFont.truetype("arialbd.ttf", 36)
-        sub_font = ImageFont.truetype("arialbd.ttf", 26)
-        small_font = ImageFont.truetype("arial.ttf", 20)
+        sub_font = ImageFont.truetype("arialbd.ttf", 24)
+        small_font = ImageFont.truetype("arial.ttf", 18)
     except:
         title_font = ImageFont.load_default()
         sub_font = ImageFont.load_default()
         small_font = ImageFont.load_default()
 
+    # Overlay text
     text_color = (255, 255, 255)
-
-    # Draw dynamic text
     draw.text((30, 20), f"{symbol} Trading Signal", font=title_font, fill=text_color)
     draw.text((30, 80), f"{final_signal} ({confidence}%)", font=sub_font, fill=text_color)
     draw.text((30, 130), f"Votes → BUY: {buy_votes} | SELL: {sell_votes}", font=sub_font, fill=text_color)
@@ -63,7 +62,6 @@ def create_professional_signal_image(symbol, final_signal, confidence, buy_votes
     draw.text((30, 210), f"MACD: {macd}   Stochastic: {stoch}", font=small_font, fill=text_color)
     draw.text((30, 240), f"Alligator: {alligator_trend}   ZigZag: {zigzag}", font=small_font, fill=text_color)
 
-    # Save to bytes
     bio = io.BytesIO()
     bg.save(bio, format="PNG")
     bio.seek(0)
@@ -146,13 +144,16 @@ def get_tradingview_data(symbol, interval=Interval.INTERVAL_1_MINUTE):
             f"{alert}"
             f"🕐 Interval: {interval}"
         )
+
         return message, final_signal, buy_votes, sell_votes, rsi, ema20, ema50, macd, stoch, alligator_trend, zigzag
 
     except Exception as e:
-        return f"⚠️ Error fetching data for {symbol}: {e}", None,0,0,0,0,0,0,0,"N/A","N/A"
+        return f"⚠️ Error fetching data for {symbol}: {e}", None, 0, 0, 0, 0, 0, 0, 0, "N/A", "N/A"
 
 # ====== INTERACTIVE SIGNAL SYSTEM ======
-PAIRS = ["EURUSD", "USDJPY", "GBPUSD", "AUDUSD", "USDCHF", "USDCAD", "NZDUSD","EURCAD","GBPAUD","CADJPY","EURGBP","AUDCAD","CADJPY","AUDCHF","AUDJPY","EURAUD"]
+PAIRS = ["EURUSD", "USDJPY", "GBPUSD", "AUDUSD", "USDCHF", "USDCAD", "NZDUSD",
+         "EURCAD", "GBPAUD", "CADJPY", "EURGBP", "AUDCAD", "CADJPY", "AUDCHF",
+         "AUDJPY", "EURAUD"]
 TIMEFRAMES = {
     "1m": Interval.INTERVAL_1_MINUTE,
     "5m": Interval.INTERVAL_5_MINUTES,
@@ -176,22 +177,30 @@ def callback_handler(call):
         pair = data.split("_")[1]
         keyboard = [[InlineKeyboardButton(tf, callback_data=f"time_{pair}_{tf}")] for tf in TIMEFRAMES.keys()]
         markup = InlineKeyboardMarkup(keyboard)
-        bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id,
-                              text=f"Select timeframe for {pair}:", reply_markup=markup)
+        bot.edit_message_text(chat_id=call.message.chat.id,
+                              message_id=call.message.message_id,
+                              text=f"Select timeframe for {pair}:",
+                              reply_markup=markup)
 
     elif data.startswith("time_"):
         _, pair, tf = data.split("_")
         interval = TIMEFRAMES[tf]
+
         result, final_signal, buy_votes, sell_votes, rsi, ema20, ema50, macd, stoch, alligator_trend, zigzag = get_tradingview_data(pair, interval)
 
-        if final_signal:  # Only generate image if a valid signal
-            confidence = round(buy_votes / (buy_votes + sell_votes) * 100 if final_signal == "BUY" else sell_votes / (buy_votes + sell_votes) * 100, 0)
-            image_data = create_professional_signal_image(pair, final_signal, confidence, buy_votes, sell_votes,
-                                                          rsi, ema20, ema50, macd, stoch, alligator_trend, zigzag)
+        if final_signal:  # Only generate image if valid signal
+            confidence = round(
+                buy_votes / (buy_votes + sell_votes) * 100 if final_signal == "BUY"
+                else sell_votes / (buy_votes + sell_votes) * 100, 0
+            )
+            image_data = create_professional_signal_image(
+                pair, final_signal, confidence, buy_votes, sell_votes,
+                rsi, ema20, ema50, macd, stoch, alligator_trend, zigzag
+            )
             bot.send_photo(call.message.chat.id, photo=image_data, caption=result, parse_mode="Markdown")
         else:
             bot.send_message(call.message.chat.id, text=result, parse_mode="Markdown")
 
 # ====== START BOT ======
 print("🤖 TradingView Signal Bot is running...")
-bot.infinity_polling()
+bot.infinity_polling() 
