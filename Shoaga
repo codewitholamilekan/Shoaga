@@ -1,0 +1,197 @@
+import telebot
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+from tradingview_ta import TA_Handler, Interval, Exchange
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
+import io
+
+# ===== CONFIG =====
+BOT_TOKEN = "8282813967:AAEbu2NlpUky6mwV1EzJafYHgu3oewrqgmc"
+bot = telebot.TeleBot(BOT_TOKEN)
+
+# ====== TRADE STATS SYSTEM ======
+stats = {"wins": 0, "losses": 0}
+
+def get_stats_text():
+    total = stats["wins"] + stats["losses"]
+    win_rate = (stats["wins"] / total * 100) if total > 0 else 0
+    return (
+        f"📊 *Trading Stats:*\n"
+        f"✅ Wins: {stats['wins']}\n"
+        f"❌ Losses: {stats['losses']}\n"
+        f"⚖️ Win Rate: {win_rate:.1f}%"
+    )
+
+@bot.message_handler(commands=["win"])
+def win_trade(message):
+    stats["wins"] += 1
+    bot.reply_to(message, "✅ Win recorded!")
+
+@bot.message_handler(commands=["loss"])
+def loss_trade(message):
+    stats["losses"] += 1
+    bot.reply_to(message, "❌ Loss recorded!")
+
+@bot.message_handler(commands=["stats"])
+def show_stats(message):
+    bot.reply_to(message, get_stats_text(), parse_mode="Markdown")
+
+# ====== PROFESSIONAL SIGNAL IMAGE USING TEMPLATE ======
+def create_professional_signal_image(symbol, final_signal, confidence, buy_votes, sell_votes,
+                                     rsi, ema20, ema50, macd, stoch, alligator_trend, zigzag):
+    # Load pre-made template PNG
+    template_path = "buy_template.png" if final_signal == "BUY" else "sell_template.png"
+    bg = Image.open(template_path).convert("RGBA")
+    draw = ImageDraw.Draw(bg)
+
+    # Fonts
+    try:
+        title_font = ImageFont.truetype("arialbd.ttf", 36)
+        sub_font = ImageFont.truetype("arialbd.ttf", 26)
+        small_font = ImageFont.truetype("arial.ttf", 20)
+    except:
+        title_font = ImageFont.load_default()
+        sub_font = ImageFont.load_default()
+        small_font = ImageFont.load_default()
+
+    text_color = (255, 255, 255)
+
+    # Draw dynamic text
+    draw.text((30, 20), f"{symbol} Trading Signal", font=title_font, fill=text_color)
+    draw.text((30, 80), f"{final_signal} ({confidence}%)", font=sub_font, fill=text_color)
+    draw.text((30, 130), f"Votes → BUY: {buy_votes} | SELL: {sell_votes}", font=sub_font, fill=text_color)
+    draw.text((30, 180), f"RSI: {rsi}   EMA20 / EMA50: {ema20} / {ema50}", font=small_font, fill=text_color)
+    draw.text((30, 210), f"MACD: {macd}   Stochastic: {stoch}", font=small_font, fill=text_color)
+    draw.text((30, 240), f"Alligator: {alligator_trend}   ZigZag: {zigzag}", font=small_font, fill=text_color)
+
+    # Save to bytes
+    bio = io.BytesIO()
+    bg.save(bio, format="PNG")
+    bio.seek(0)
+    return bio
+
+# ====== TRADINGVIEW ANALYSIS ======
+def get_tradingview_data(symbol, interval=Interval.INTERVAL_1_MINUTE):
+    try:
+        handler = TA_Handler(
+            symbol=symbol,
+            screener="forex",
+            exchange="FX_IDC",
+            interval=interval
+        )
+        analysis = handler.get_analysis()
+        indicators = analysis.indicators
+
+        rsi = indicators.get("RSI")
+        ema20 = indicators.get("EMA20")
+        ema50 = indicators.get("EMA50")
+        macd = indicators.get("MACD.macd")
+        stoch = indicators.get("Stoch.K") or indicators.get("STOCH.k")
+        jaw = indicators.get("ALLIGATORJaw")
+        teeth = indicators.get("ALLIGATORTeeth")
+        lips = indicators.get("ALLIGATORLips")
+        close = indicators.get("close")
+        open_ = indicators.get("open")
+
+        zigzag = "Bullish" if close and open_ and close > open_ else "Bearish"
+
+        if jaw and teeth and lips:
+            if lips > teeth > jaw:
+                alligator_trend = "Uptrend"
+            elif lips < teeth < jaw:
+                alligator_trend = "Downtrend"
+            else:
+                alligator_trend = "Sideways"
+        else:
+            alligator_trend = "N/A"
+
+        votes = []
+        if rsi is not None:
+            votes.append("BUY" if rsi > 55 else "SELL" if rsi < 45 else "NEUTRAL")
+        if ema20 and ema50:
+            votes.append("BUY" if ema20 > ema50 else "SELL")
+        if macd is not None:
+            votes.append("BUY" if macd > 0 else "SELL")
+        if stoch is not None:
+            votes.append("BUY" if stoch > 55 else "SELL" if stoch < 45 else "NEUTRAL")
+        if alligator_trend == "Uptrend":
+            votes.append("BUY")
+        elif alligator_trend == "Downtrend":
+            votes.append("SELL")
+        votes.append("BUY" if zigzag == "Bullish" else "SELL")
+
+        buy_votes = votes.count("BUY")
+        sell_votes = votes.count("SELL")
+
+        if buy_votes > sell_votes:
+            final_signal = "BUY"
+        elif sell_votes > buy_votes:
+            final_signal = "SELL"
+        else:
+            final_signal = "NEUTRAL"
+
+        alert = ""
+        if final_signal in ("BUY", "SELL") and abs(buy_votes - sell_votes) >= 3:
+            alert = "\n⚡ *ENTER THE MARKET WITH THE NEXT CANDLE!* ⚡\n"
+
+        message = (
+            f"📊 *TradingView Analysis for {symbol}*\n"
+            f"💹 Recommendation: *{final_signal}*\n\n"
+            f"RSI: {rsi}\n"
+            f"EMA20: {ema20} | EMA50: {ema50}\n"
+            f"MACD: {macd}\n"
+            f"Stochastic: {stoch}\n"
+            f"Alligator: {alligator_trend}\n"
+            f"ZigZag: {zigzag} pattern\n\n"
+            f"🧠 Votes → BUY: {buy_votes} | SELL: {sell_votes}\n"
+            f"{alert}"
+            f"🕐 Interval: {interval}"
+        )
+        return message, final_signal, buy_votes, sell_votes, rsi, ema20, ema50, macd, stoch, alligator_trend, zigzag
+
+    except Exception as e:
+        return f"⚠️ Error fetching data for {symbol}: {e}", None,0,0,0,0,0,0,0,"N/A","N/A"
+
+# ====== INTERACTIVE SIGNAL SYSTEM ======
+PAIRS = ["EURUSD", "USDJPY", "GBPUSD", "AUDUSD", "USDCHF", "USDCAD", "NZDUSD","EURCAD","GBPAUD","CADJPY","EURGBP","AUDCAD","CADJPY","AUDCHF","AUDJPY","EURAUD"]
+TIMEFRAMES = {
+    "1m": Interval.INTERVAL_1_MINUTE,
+    "5m": Interval.INTERVAL_5_MINUTES,
+    "15m": Interval.INTERVAL_15_MINUTES,
+    "1h": Interval.INTERVAL_1_HOUR,
+    "4h": Interval.INTERVAL_4_HOURS,
+    "1d": Interval.INTERVAL_1_DAY
+}
+
+@bot.message_handler(commands=["signal"])
+def start_signal(message):
+    keyboard = [[InlineKeyboardButton(pair, callback_data=f"pair_{pair}")] for pair in PAIRS]
+    markup = InlineKeyboardMarkup(keyboard)
+    bot.send_message(message.chat.id, "Select a currency pair:", reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("pair_") or call.data.startswith("time_"))
+def callback_handler(call):
+    data = call.data
+
+    if data.startswith("pair_"):
+        pair = data.split("_")[1]
+        keyboard = [[InlineKeyboardButton(tf, callback_data=f"time_{pair}_{tf}")] for tf in TIMEFRAMES.keys()]
+        markup = InlineKeyboardMarkup(keyboard)
+        bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id,
+                              text=f"Select timeframe for {pair}:", reply_markup=markup)
+
+    elif data.startswith("time_"):
+        _, pair, tf = data.split("_")
+        interval = TIMEFRAMES[tf]
+        result, final_signal, buy_votes, sell_votes, rsi, ema20, ema50, macd, stoch, alligator_trend, zigzag = get_tradingview_data(pair, interval)
+
+        if final_signal:  # Only generate image if a valid signal
+            confidence = round(buy_votes / (buy_votes + sell_votes) * 100 if final_signal == "BUY" else sell_votes / (buy_votes + sell_votes) * 100, 0)
+            image_data = create_professional_signal_image(pair, final_signal, confidence, buy_votes, sell_votes,
+                                                          rsi, ema20, ema50, macd, stoch, alligator_trend, zigzag)
+            bot.send_photo(call.message.chat.id, photo=image_data, caption=result, parse_mode="Markdown")
+        else:
+            bot.send_message(call.message.chat.id, text=result, parse_mode="Markdown")
+
+# ====== START BOT ======
+print("🤖 TradingView Signal Bot is running...")
+bot.infinity_polling()
